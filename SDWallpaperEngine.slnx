@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="SDWallpaperEngine.ComfyUi/SDWallpaperEngine.ComfyUi.csproj" />
+  <Project Path="SDWallpaperEngine.Forms/SDWallpaperEngine.Forms.csproj" />
+  <Project Path="SDWallpaperEngine.Shared/SDWallpaperEngine.Shared.csproj" />
+</Solution>

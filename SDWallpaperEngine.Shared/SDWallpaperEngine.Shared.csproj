@@ -1,0 +1,34 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Remove="Ressources\favicon.ico" />
+    <None Remove="Ressources\favicon.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Ressources\fast_wallpaper_gen.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Ressources\wallpaper_pixelart.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Ressources\Output\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Ressources\favicon.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Resource>
+    <Resource Include="Ressources\favicon.png" />
+  </ItemGroup>
+
+</Project>
