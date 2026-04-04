@@ -2,6 +2,7 @@ using SDWallpaperEngine.ComfyUi;
 using SDWallpaperEngine.Shared;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Net.Http;
 using System.Text;
 
 namespace SDWallpaperEngine.Forms
@@ -19,6 +20,8 @@ namespace SDWallpaperEngine.Forms
         private CancellationTokenSource? _loopCancellation;
         private Task? _loopTask;
         private bool _isClosing;
+        private bool _suppressEnabledChanged;
+        private string? _savedWallpaperPath;
         private int _consecutiveFailures;
         private const int MaxLogEntries = 500;
 
@@ -52,24 +55,68 @@ namespace SDWallpaperEngine.Forms
 
             if (checkBox_enabled.Checked)
             {
+                if (!SaveCurrentWallpaperForRestore())
+                {
+                    _suppressEnabledChanged = true;
+                    checkBox_enabled.Checked = false;
+                    _suppressEnabledChanged = false;
+                    return;
+                }
+
                 StartLoop();
             }
         }
 
         private async void CheckBoxEnabled_CheckedChanged(object? sender, EventArgs e)
         {
-            if (_isClosing)
+            if (_isClosing || _suppressEnabledChanged)
             {
                 return;
             }
 
             if (checkBox_enabled.Checked)
             {
+                if (!SaveCurrentWallpaperForRestore())
+                {
+                    _suppressEnabledChanged = true;
+                    checkBox_enabled.Checked = false;
+                    _suppressEnabledChanged = false;
+                    return;
+                }
+
                 StartLoop();
             }
             else
             {
                 await StopLoopAsync().ConfigureAwait(true);
+            }
+        }
+
+        private bool SaveCurrentWallpaperForRestore()
+        {
+            try
+            {
+                var currentWallpaper = WallpaperManager.ResolveCurrentWallpaperFilePath();
+                var backupDirectory = Path.Combine(Path.GetTempPath(), "SDWallpaperEngine", "WallpaperBackup");
+                Directory.CreateDirectory(backupDirectory);
+
+                var extension = Path.GetExtension(currentWallpaper);
+                if (string.IsNullOrWhiteSpace(extension))
+                {
+                    extension = ".bmp";
+                }
+
+                var backupPath = Path.Combine(backupDirectory, $"original_wallpaper{extension}");
+                File.Copy(currentWallpaper, backupPath, overwrite: true);
+                _savedWallpaperPath = backupPath;
+                AddLog($"Wallpaper backup saved: {backupPath}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _savedWallpaperPath = null;
+                AddErrorLog($"Wallpaper backup failed: {ex.Message}");
+                return false;
             }
         }
 
@@ -454,7 +501,186 @@ namespace SDWallpaperEngine.Forms
             }
         }
 
+        private async Task<bool> IsComfyUiApiReachableAsync(CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                using var client = new HttpClient
+                {
+                    BaseAddress = new Uri(_settings.ComfyUiApiUrl, UriKind.Absolute),
+                    Timeout = TimeSpan.FromSeconds(3)
+                };
 
+                if (!string.IsNullOrWhiteSpace(_settings.ComfyUiApiKey))
+                {
+                    client.DefaultRequestHeaders.TryAddWithoutValidation("X-API-Key", _settings.ComfyUiApiKey);
+                    client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", $"Bearer {_settings.ComfyUiApiKey}");
+                }
 
+                using var response = await client.GetAsync("/system_stats", cancellationToken).ConfigureAwait(true);
+                return true;
+            }
+            catch (HttpRequestException)
+            {
+                return false;
+            }
+            catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                return false;
+            }
+            catch (UriFormatException)
+            {
+                return false;
+            }
+        }
+
+        private Process StartComfyUiProcess()
+        {
+            var exePath = Environment.ExpandEnvironmentVariables(_settings.ComfyUiExePath);
+            if (string.IsNullOrWhiteSpace(exePath))
+            {
+                throw new InvalidOperationException("ComfyUI executable path is not configured.");
+            }
+
+            exePath = Path.GetFullPath(exePath);
+            if (!File.Exists(exePath))
+            {
+                throw new FileNotFoundException("ComfyUI executable was not found.", exePath);
+            }
+
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = exePath,
+                Arguments = _settings.ComfyUiLaunchArguments ?? string.Empty,
+                WorkingDirectory = Path.GetDirectoryName(exePath) ?? AppContext.BaseDirectory,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden
+            };
+
+            var process = Process.Start(startInfo);
+            return process ?? throw new InvalidOperationException("ComfyUI process could not be started.");
+        }
+
+        private int GetComfyUiProcessCount()
+        {
+            var exePath = Environment.ExpandEnvironmentVariables(_settings.ComfyUiExePath);
+            var processName = Path.GetFileNameWithoutExtension(exePath);
+            if (string.IsNullOrWhiteSpace(processName))
+            {
+                processName = "ComfyUI";
+            }
+
+            try
+            {
+                return Process.GetProcessesByName(processName).Length;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private async Task<bool> EnsureComfyUiRunningAsync()
+        {
+            if (await IsComfyUiApiReachableAsync().ConfigureAwait(true))
+            {
+                AddSuccessLog($"ComfyUI API erreichbar: {_settings.ComfyUiApiUrl}");
+                return true;
+            }
+
+            var processCount = GetComfyUiProcessCount();
+            if (processCount > 0)
+            {
+                AddErrorLog($"ComfyUI läuft bereits ({processCount} Prozess(e)), aber die API unter {_settings.ComfyUiApiUrl} ist nicht erreichbar. Wahrscheinlich ist die Adresse oder der Port falsch konfiguriert.");
+                return false;
+            }
+
+            try
+            {
+                StartComfyUiProcess();
+                AddLog($"ComfyUI gestartet: {_settings.ComfyUiExePath}");
+            }
+            catch (Exception ex)
+            {
+                AddErrorLog($"ComfyUI konnte nicht gestartet werden: {ex.Message}");
+                return false;
+            }
+
+            for (var i = 0; i < 20; i++)
+            {
+                await Task.Delay(1000).ConfigureAwait(true);
+                if (await IsComfyUiApiReachableAsync().ConfigureAwait(true))
+                {
+                    AddSuccessLog($"ComfyUI API ist jetzt erreichbar: {_settings.ComfyUiApiUrl}");
+                    return true;
+                }
+            }
+
+            processCount = GetComfyUiProcessCount();
+            if (processCount > 0)
+            {
+                AddErrorLog($"ComfyUI wurde gestartet, aber die API unter {_settings.ComfyUiApiUrl} ist noch nicht erreichbar. Prüfe Port, Startargumente und API-Konfiguration.");
+            }
+            else
+            {
+                AddErrorLog("ComfyUI wurde gestartet, läuft aber offenbar nicht mehr.");
+            }
+
+            return false;
+        }
+
+        private async void button_reset_Click(object sender, EventArgs e)
+        {
+            if (checkBox_enabled.Checked)
+            {
+                _suppressEnabledChanged = true;
+                checkBox_enabled.Checked = false;
+                _suppressEnabledChanged = false;
+            }
+
+            if (_loopTask is not null && !_loopTask.IsCompleted)
+            {
+                try
+                {
+                    await StopLoopAsync().ConfigureAwait(true);
+                }
+                catch (Exception ex)
+                {
+                    AddErrorLog($"Wallpaper engine stop failed: {ex.Message}");
+                    return;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(_savedWallpaperPath) || !File.Exists(_savedWallpaperPath))
+            {
+                AddErrorLog("No saved wallpaper available to restore.");
+                return;
+            }
+
+            try
+            {
+                WallpaperManager.SetWallpaper(_savedWallpaperPath);
+                TryShowCurrentWallpaperPreview();
+                AddSuccessLog("Wallpaper restored.");
+            }
+            catch (Exception ex)
+            {
+                AddErrorLog($"Wallpaper restore failed: {ex.Message}");
+            }
+        }
+
+        private async void button_comfyUi_Click(object sender, EventArgs e)
+        {
+            button_comfyUi.Enabled = false;
+            try
+            {
+                await EnsureComfyUiRunningAsync().ConfigureAwait(true);
+            }
+            finally
+            {
+                button_comfyUi.Enabled = true;
+            }
+        }
     }
 }

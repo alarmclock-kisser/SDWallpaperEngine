@@ -45,6 +45,8 @@
             checkBox_record = new CheckBox();
             numericUpDown_gifDelay = new NumericUpDown();
             label_info_gifDelay = new Label();
+            button_reset = new Button();
+            button_comfyUi = new Button();
             ((System.ComponentModel.ISupportInitialize)numericUpDown_interval).BeginInit();
             ((System.ComponentModel.ISupportInitialize)numericUpDown_batch).BeginInit();
             ((System.ComponentModel.ISupportInitialize)numericUpDown_steps).BeginInit();
@@ -220,11 +222,33 @@
             label_info_gifDelay.TabIndex = 16;
             label_info_gifDelay.Text = "ms/frame";
             // 
+            // button_reset
+            // 
+            button_reset.Location = new Point(239, 145);
+            button_reset.Name = "button_reset";
+            button_reset.Size = new Size(50, 23);
+            button_reset.TabIndex = 17;
+            button_reset.Text = "Reset";
+            button_reset.UseVisualStyleBackColor = true;
+            button_reset.Click += button_reset_Click;
+            // 
+            // button_comfyUi
+            // 
+            button_comfyUi.Location = new Point(297, 145);
+            button_comfyUi.Name = "button_comfyUi";
+            button_comfyUi.Size = new Size(75, 23);
+            button_comfyUi.TabIndex = 18;
+            button_comfyUi.Text = "ComfyUI";
+            button_comfyUi.UseVisualStyleBackColor = true;
+            button_comfyUi.Click += button_comfyUi_Click;
+            // 
             // WindowMain
             // 
             AutoScaleDimensions = new SizeF(7F, 15F);
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(384, 451);
+            Controls.Add(button_comfyUi);
+            Controls.Add(button_reset);
             Controls.Add(label_info_gifDelay);
             Controls.Add(numericUpDown_gifDelay);
             Controls.Add(checkBox_record);
@@ -274,5 +298,7 @@
         private CheckBox checkBox_record;
         private NumericUpDown numericUpDown_gifDelay;
         private Label label_info_gifDelay;
+        private Button button_reset;
+        private Button button_comfyUi;
     }
 }
