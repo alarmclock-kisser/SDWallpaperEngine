@@ -21,6 +21,8 @@ namespace SDWallpaperEngine.Forms
         private Task? _loopTask;
         private bool _isClosing;
         private bool _suppressEnabledChanged;
+        private bool _suppressSettingsChangeEvents;
+        private bool _suppressRecordSync;
         private string? _savedWallpaperPath;
         private int _consecutiveFailures;
         private const int MaxLogEntries = 500;
@@ -38,11 +40,6 @@ namespace SDWallpaperEngine.Forms
             numericUpDown_maxImages.Value = maxImages;
 
             Text = BaseTitle;
-            checkBox_enabled.CheckedChanged += CheckBoxEnabled_CheckedChanged;
-            checkBox_record.CheckedChanged += CheckBoxRecord_CheckedChanged;
-            listBox_log.MouseDoubleClick += ListBoxLog_MouseDoubleClick;
-            Shown += WindowMain_Shown;
-            FormClosing += WindowMain_FormClosing;
         }
 
         private void WindowMain_Shown(object? sender, EventArgs e)
@@ -106,8 +103,8 @@ namespace SDWallpaperEngine.Forms
                     extension = ".bmp";
                 }
 
-                var backupPath = Path.Combine(backupDirectory, $"original_wallpaper{extension}");
-                File.Copy(currentWallpaper, backupPath, overwrite: true);
+                var backupPath = Path.Combine(backupDirectory, $"original_wallpaper_{DateTime.UtcNow:yyyyMMdd_HHmmssfff}_{Guid.NewGuid():N}{extension}");
+                File.Copy(currentWallpaper, backupPath, overwrite: false);
                 _savedWallpaperPath = backupPath;
                 AddLog($"Wallpaper backup saved: {backupPath}");
                 return true;
@@ -223,6 +220,7 @@ namespace SDWallpaperEngine.Forms
                 {
                     _consecutiveFailures++;
                     await TryRecoverAfterFailureAsync(cancellationToken).ConfigureAwait(false);
+                    UpdateProgress(0d);
                     UpdateStatus($"error: {ex.Message}");
                     AddErrorLog($"{ex.GetType().Name}: {ex.Message}");
                 }
@@ -250,6 +248,13 @@ namespace SDWallpaperEngine.Forms
 
         private void CheckBoxRecord_CheckedChanged(object? sender, EventArgs e)
         {
+            if (!_suppressRecordSync)
+            {
+                _suppressRecordSync = true;
+                saveFramesToolStripMenuItem.Checked = checkBox_record.Checked;
+                _suppressRecordSync = false;
+            }
+
             if (checkBox_record.Checked)
             {
                 StartGifRecording();
@@ -680,6 +685,222 @@ namespace SDWallpaperEngine.Forms
             finally
             {
                 button_comfyUi.Enabled = true;
+            }
+        }
+
+        private void WindowMain_Load(object sender, EventArgs e)
+        {
+            _suppressSettingsChangeEvents = true;
+
+            toolStripTextBox_outputFolder.Text = _settings.OutputDirectory;
+            toolStripTextBox_outputDirectory.Text = _settings.OutputDirectory;
+            toolStripTextBox_comfyUiApiUrl.Text = _settings.ComfyUiApiUrl;
+            toolStripTextBox_comfyUiApiKey.Text = _settings.ComfyUiApiKey;
+            toolStripTextBox_comfyUiExePath.Text = _settings.ComfyUiExePath;
+            toolStripTextBox_comfyUiLaunchArguments.Text = _settings.ComfyUiLaunchArguments;
+            toolStripTextBox_comfyUiWorkflowPath.Text = _settings.ComfyUiWorkflowTemplatePath;
+            toolStripTextBox_positivePrompt.Text = _settings.PositivePrompt;
+            toolStripTextBox_negativePrompt.Text = _settings.NegativePrompt;
+            toolStripTextBox_maxKeepAmount.Text = _settings.MaxImagesKeep.ToString();
+            toolStripTextBox_maxTimeout.Text = _settings.MaxTimeoutSeconds.ToString();
+            toolStripTextBox_maxRetries.Text = _settings.MaxRetries.ToString();
+
+            _suppressSettingsChangeEvents = false;
+
+            _suppressRecordSync = true;
+            saveFramesToolStripMenuItem.Checked = checkBox_record.Checked;
+            _suppressRecordSync = false;
+        }
+
+        private void saveFramesToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
+        {
+            if (_suppressRecordSync)
+            {
+                return;
+            }
+
+            _suppressRecordSync = true;
+            checkBox_record.Checked = saveFramesToolStripMenuItem.Checked;
+            _suppressRecordSync = false;
+        }
+
+        private void openOutputFolderToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            button_openOutput_Click(sender, e);
+        }
+
+        private void cloarOutputFolderToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            var outputDir = WallpaperManager.ResolveOutputDirectoryPath(_settings.OutputDirectory);
+            Directory.CreateDirectory(outputDir);
+
+            try
+            {
+                var deletedFiles = 0;
+                foreach (var file in Directory.EnumerateFiles(outputDir, "*", SearchOption.TopDirectoryOnly))
+                {
+                    File.Delete(file);
+                    deletedFiles++;
+                }
+
+                foreach (var dir in Directory.EnumerateDirectories(outputDir, "*", SearchOption.TopDirectoryOnly))
+                {
+                    Directory.Delete(dir, recursive: true);
+                }
+
+                AddSuccessLog($"Output folder cleared: {deletedFiles} file(s) removed.");
+            }
+            catch (Exception ex)
+            {
+                AddErrorLog($"Could not clear output folder: {ex.Message}");
+            }
+        }
+
+        private void helpToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            AddLog("Help: Use Options > Edit appsettings to update API URL, prompts, retries, timeout and output path.");
+        }
+
+        private void toolStripTextBox_outputFolder_TextChanged(object sender, EventArgs e)
+        {
+            ApplyOutputDirectoryFromMenuText(toolStripTextBox_outputFolder.Text, updateOutputFolderTextBox: false);
+        }
+
+        private void toolStripTextBox_outputDirectory_TextChanged(object sender, EventArgs e)
+        {
+            ApplyOutputDirectoryFromMenuText(toolStripTextBox_outputDirectory.Text, updateOutputFolderTextBox: true);
+        }
+
+        private void ApplyOutputDirectoryFromMenuText(string text, bool updateOutputFolderTextBox)
+        {
+            if (_suppressSettingsChangeEvents)
+            {
+                return;
+            }
+
+            _settings.OutputDirectory = text;
+
+            _suppressSettingsChangeEvents = true;
+            if (updateOutputFolderTextBox)
+            {
+                toolStripTextBox_outputFolder.Text = text;
+            }
+            else
+            {
+                toolStripTextBox_outputDirectory.Text = text;
+            }
+
+            _suppressSettingsChangeEvents = false;
+        }
+
+        private void toolStripTextBox_comfyUiApiUrl_TextChanged(object sender, EventArgs e)
+        {
+            if (_suppressSettingsChangeEvents)
+            {
+                return;
+            }
+
+            _settings.ComfyUiApiUrl = toolStripTextBox_comfyUiApiUrl.Text.Trim();
+        }
+
+        private void toolStripTextBox_comfyUiApiKey_TextChanged(object sender, EventArgs e)
+        {
+            if (_suppressSettingsChangeEvents)
+            {
+                return;
+            }
+
+            _settings.ComfyUiApiKey = toolStripTextBox_comfyUiApiKey.Text;
+        }
+
+        private void toolStripTextBox_comfyUiExePath_TextChanged(object sender, EventArgs e)
+        {
+            if (_suppressSettingsChangeEvents)
+            {
+                return;
+            }
+
+            _settings.ComfyUiExePath = toolStripTextBox_comfyUiExePath.Text.Trim();
+        }
+
+        private void toolStripTextBox_comfyUiLaunchArguments_TextChanged(object sender, EventArgs e)
+        {
+            if (_suppressSettingsChangeEvents)
+            {
+                return;
+            }
+
+            _settings.ComfyUiLaunchArguments = toolStripTextBox_comfyUiLaunchArguments.Text;
+        }
+
+        private void toolStripTextBox_comfyUiWorkflowPath_TextChanged(object sender, EventArgs e)
+        {
+            if (_suppressSettingsChangeEvents)
+            {
+                return;
+            }
+
+            _settings.ComfyUiWorkflowTemplatePath = toolStripTextBox_comfyUiWorkflowPath.Text.Trim();
+        }
+
+        private void toolStripTextBox_positivePrompt_TextChanged(object sender, EventArgs e)
+        {
+            if (_suppressSettingsChangeEvents)
+            {
+                return;
+            }
+
+            _settings.PositivePrompt = toolStripTextBox_positivePrompt.Text;
+        }
+
+        private void toolStripTextBox_negativePrompt_TextChanged(object sender, EventArgs e)
+        {
+            if (_suppressSettingsChangeEvents)
+            {
+                return;
+            }
+
+            _settings.NegativePrompt = toolStripTextBox_negativePrompt.Text;
+        }
+
+        private void toolStripTextBox_maxKeepAmount_TextChanged(object sender, EventArgs e)
+        {
+            if (_suppressSettingsChangeEvents)
+            {
+                return;
+            }
+
+            if (int.TryParse(toolStripTextBox_maxKeepAmount.Text.Trim(), out var value) && value > 0)
+            {
+                _settings.MaxImagesKeep = value;
+                var clamped = Math.Clamp(value, (int)numericUpDown_maxImages.Minimum, (int)numericUpDown_maxImages.Maximum);
+                numericUpDown_maxImages.Value = clamped;
+            }
+        }
+
+        private void toolStripTextBox_maxTimeout_TextChanged(object sender, EventArgs e)
+        {
+            if (_suppressSettingsChangeEvents)
+            {
+                return;
+            }
+
+            if (int.TryParse(toolStripTextBox_maxTimeout.Text.Trim(), out var value) && value > 0)
+            {
+                _settings.MaxTimeoutSeconds = value;
+            }
+        }
+
+        private void toolStripTextBox_maxRetries_TextChanged(object sender, EventArgs e)
+        {
+            if (_suppressSettingsChangeEvents)
+            {
+                return;
+            }
+
+            if (int.TryParse(toolStripTextBox_maxRetries.Text.Trim(), out var value) && value > 0)
+            {
+                _settings.MaxRetries = value;
             }
         }
     }

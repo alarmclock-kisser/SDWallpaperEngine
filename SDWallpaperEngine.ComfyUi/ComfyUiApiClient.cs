@@ -472,7 +472,16 @@ namespace SDWallpaperEngine.ComfyUi
                         continue;
                     }
 
-                    response.EnsureSuccessStatusCode();
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        var errorBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                        var message = string.IsNullOrWhiteSpace(errorBody)
+                            ? $"The ComfyUI request failed with status code {(int)response.StatusCode} ({response.ReasonPhrase})."
+                            : $"The ComfyUI request failed with status code {(int)response.StatusCode} ({response.ReasonPhrase}). Response: {errorBody}";
+
+                        throw new HttpRequestException(message, null, response.StatusCode);
+                    }
+
                     return response;
                 }
                 catch (Exception ex) when (attempt < attempts && IsRetryable(ex, cancellationToken))

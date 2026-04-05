@@ -14,6 +14,7 @@ namespace SDWallpaperEngine.Forms
             ["KSampler"] = ["seed", "steps", "cfg", "sampler_name", "scheduler", "denoise"],
             ["LoadImage"] = ["image", "upload"],
             ["ImageScale"] = ["upscale_method", "width", "height", "crop"],
+            ["ImageScaleBy"] = ["upscale_method", "scale_by"],
             ["SaveImage"] = ["filename_prefix"]
         };
 
