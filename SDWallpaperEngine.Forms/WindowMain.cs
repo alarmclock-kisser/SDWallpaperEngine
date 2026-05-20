@@ -23,7 +23,7 @@ namespace SDWallpaperEngine.Forms
         private bool _suppressEnabledChanged;
         private bool _suppressSettingsChangeEvents;
         private bool _suppressRecordSync;
-        private string? _savedWallpaperPath;
+        private IReadOnlyDictionary<string, string>? _savedWallpapersByMonitor;
         private int _consecutiveFailures;
         private const int MaxLogEntries = 500;
 
@@ -93,25 +93,35 @@ namespace SDWallpaperEngine.Forms
         {
             try
             {
-                var currentWallpaper = WallpaperManager.ResolveCurrentWallpaperFilePath();
+                var currentWallpapers = WallpaperManager.ResolveCurrentWallpaperFilePathsPerMonitor();
                 var backupDirectory = Path.Combine(Path.GetTempPath(), "SDWallpaperEngine", "WallpaperBackup");
                 Directory.CreateDirectory(backupDirectory);
 
-                var extension = Path.GetExtension(currentWallpaper);
-                if (string.IsNullOrWhiteSpace(extension))
+                var backupMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var monitorWallpaper in currentWallpapers)
                 {
-                    extension = ".bmp";
+                    var extension = Path.GetExtension(monitorWallpaper.Value);
+                    if (string.IsNullOrWhiteSpace(extension))
+                    {
+                        extension = ".bmp";
+                    }
+
+                    var monitorKey = string.IsNullOrWhiteSpace(monitorWallpaper.Key)
+                        ? "global"
+                        : string.Concat(monitorWallpaper.Key.Select(ch => char.IsLetterOrDigit(ch) ? ch : '_'));
+
+                    var backupPath = Path.Combine(backupDirectory, $"original_wallpaper_{monitorKey}_{DateTime.UtcNow:yyyyMMdd_HHmmssfff}_{Guid.NewGuid():N}{extension}");
+                    File.Copy(monitorWallpaper.Value, backupPath, overwrite: false);
+                    backupMap[monitorWallpaper.Key] = backupPath;
+                    AddLog($"Wallpaper backup saved ({(string.IsNullOrWhiteSpace(monitorWallpaper.Key) ? "global" : monitorWallpaper.Key)}): {backupPath}");
                 }
 
-                var backupPath = Path.Combine(backupDirectory, $"original_wallpaper_{DateTime.UtcNow:yyyyMMdd_HHmmssfff}_{Guid.NewGuid():N}{extension}");
-                File.Copy(currentWallpaper, backupPath, overwrite: false);
-                _savedWallpaperPath = backupPath;
-                AddLog($"Wallpaper backup saved: {backupPath}");
+                _savedWallpapersByMonitor = backupMap;
                 return true;
             }
             catch (Exception ex)
             {
-                _savedWallpaperPath = null;
+                _savedWallpapersByMonitor = null;
                 AddErrorLog($"Wallpaper backup failed: {ex.Message}");
                 return false;
             }
@@ -657,7 +667,7 @@ namespace SDWallpaperEngine.Forms
                 }
             }
 
-            if (string.IsNullOrWhiteSpace(_savedWallpaperPath) || !File.Exists(_savedWallpaperPath))
+            if (_savedWallpapersByMonitor is null || _savedWallpapersByMonitor.Count == 0)
             {
                 AddErrorLog("No saved wallpaper available to restore.");
                 return;
@@ -665,7 +675,7 @@ namespace SDWallpaperEngine.Forms
 
             try
             {
-                WallpaperManager.SetWallpaper(_savedWallpaperPath);
+                WallpaperManager.SetWallpapersPerMonitor(_savedWallpapersByMonitor);
                 TryShowCurrentWallpaperPreview();
                 AddSuccessLog("Wallpaper restored.");
             }
